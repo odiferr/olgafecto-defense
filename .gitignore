@@ -1,0 +1,20 @@
+# C++ build output
+physics_engine/build/
+*.o
+*.so
+*.a
+
+# Python
+__pycache__/
+*.pyc
+*.pyd
+.venv/
+smoke_*.py
+
+# Local database files
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
