@@ -4,8 +4,6 @@ OlgaFecto Defense is a local simulation project I built to experiment with how a
 
 The basic idea is pretty simple: the simulation runs in C++, FastAPI sits in the middle to expose the simulation to other parts of the project, and a browser UI shows what is happening in real time.
 
-Right now everything runs locally. There is no production database, external radar feed, or connection to a real weapons system.
-
 ## How it works
 
 The project is split into a few main pieces:
