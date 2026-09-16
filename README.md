@@ -1,122 +1,177 @@
 # OlgaFecto Defense
 
-OlgaFecto Defense is a local simulation sandbox for learning how a layered interceptor system fits together:
+OlgaFecto Defense is a local simulation project I built to experiment with how a layered interceptor system could be modeled in software.
 
-- a C++ physics and engagement core compiled into a Python module with pybind11
-- a FastAPI sensor service that exposes C++ simulation snapshots
-- a browser-based live interceptor simulator
-- a placeholder data layer for future telemetry storage
+The basic idea is pretty simple: the simulation runs in C++, FastAPI sits in the middle to expose the simulation to other parts of the project, and a browser UI shows what is happening in real time.
 
-The current project is intentionally local-first. It is not connected to a production database, external sensor feed, or operational weapons system.
+Right now everything runs locally. There is no production database, external radar feed, or connection to a real weapons system.
 
-## Repository Layout
+## How it works
+
+The project is split into a few main pieces:
 
 ```text
 olgafecto-defense/
-├── physics_engine/     C++ kinematics, guidance, proximity fuze, and pybind11 binding
-├── sensor_api/         FastAPI service and radar simulation wrapper
-├── web_gui/            Browser simulator UI served by the API
-├── data_layer/         Future telemetry persistence layer
-├── scripts/            Build/run helper scripts
-└── README.md           Current architecture and runbook
+├── physics_engine/     C++ simulation and pybind11 bindings
+├── sensor_api/         FastAPI service and simulation adapter
+├── web_gui/            Browser simulator
+├── data_layer/         Future database / telemetry work
+├── scripts/            Build and run scripts
+└── README.md
 ```
 
-## Current Status
+The general flow is:
 
-Implemented today:
+```text
+Browser
+   │
+   │ HTTP
+   ▼
+FastAPI
+   │
+   │ pybind11
+   ▼
+C++ EngagementEngine
+   │
+   └── simulation state
+```
 
-- C++ state integration through `physics_engine`.
-- C++-owned engagement state machine through `EngagementEngine`: threat motion, radar gating, interceptor launch, PN guidance, speed limiting, fuze checks, leakers, and intercept counters.
-- Python import bridge for the compiled engine. Python is the API adapter only; it should not contain simulation physics or engagement decisions.
-- FastAPI endpoints:
-  - `POST /scenario`
-  - `POST /scenario/random`
-  - `GET /targets`
-  - `GET /tracks`
-  - `GET /status`
-- `GET /events`
-- `POST /stress-test`
-- Browser simulator served by the API at `/` and `/simulator`.
-- Automatic browser launch when the API starts.
-- Experimental PyQt dashboard consumer.
+The important part is that **C++ is the source of truth for the simulation**.
 
-Planned for later:
+The browser doesn't decide whether something gets intercepted, Python doesn't calculate the guidance, and the frontend isn't running a second version of the physics. The C++ engine handles the actual simulation and the other layers mostly pass data around and display it.
 
-- A real database-backed telemetry store.
-- Migrations and database lifecycle tooling.
-- Persistent engagement history.
-- Auth, user accounts, deployment hardening, and production configuration.
-- More complete API contracts for saved scenarios and replay.
+## What's working right now
 
-## Build the Physics Engine
+The C++ engine currently handles things like:
 
-From the project root:
+* target movement
+* interceptor movement
+* radar detection/gating
+* interceptor launches
+* proportional navigation guidance
+* speed limits
+* proximity fuze checks
+* intercepts
+* leakers
+* engagement counters
+* generated raid scenarios
+* stress testing
+
+The Python side exposes that through FastAPI.
+
+Current endpoints:
+
+| Endpoint                | What it does                            |
+| ----------------------- | --------------------------------------- |
+| `POST /scenario`        | Create a scenario from specific targets |
+| `POST /scenario/random` | Generate a randomized raid              |
+| `GET /targets`          | Get the current target tracks           |
+| `GET /tracks`           | Get all tracks, including interceptors  |
+| `GET /status`           | Get current engagement information      |
+| `GET /events`           | Get simulation events                   |
+| `POST /stress-test`     | Run a larger batch of simulations       |
+
+The browser simulator is served directly by the API.
+
+## Frontend
+
+The web UI is basically a visualization layer for the simulation.
+
+JavaScript handles things like:
+
+* drawing targets and interceptors
+* converting world coordinates to screen coordinates
+* rotating sprites
+* displaying the HUD
+* showing launches and impacts
+* animating explosions
+* displaying events and simulation results
+
+It does **not** handle the actual engagement logic.
+
+For example, the browser doesn't decide when an interceptor hits a target. It receives that information from the backend and displays it.
+
+### A note on development
+
+I wrote the backend and simulation side of the project myself.
+
+I did use **Claude to help with parts of the frontend and JavaScript**, mainly for UI implementation, browser-side code, and working through some of the visualization pieces.
+
+The simulation architecture and C++ backend are my own work.
+
+## Building the C++ Engine
+
+From the project directory:
 
 ```bash
 cd ~/olgafecto-defense
 ./scripts/build_engine.sh
 ```
 
-The API imports the compiled module from:
+The compiled Python module ends up in:
 
 ```text
 physics_engine/build/
 ```
 
-If the build output is missing, `sensor_api/radar_sim.py` will raise an error telling you to run the build script.
+The API expects the module to be there when it starts.
 
-## Run the API and Web Simulator
+If it isn't built yet, the API will tell you to run the build script.
 
-Start the service:
+## Running the Simulator
+
+Start the virtual environment:
 
 ```bash
 cd ~/olgafecto-defense
 source .venv/bin/activate
+```
+
+Then start FastAPI:
+
+```bash
 uvicorn sensor_api.main:app --host 0.0.0.0 --port 8080
 ```
 
-You can use any local port:
+Open:
+
+```text
+http://localhost:8080/
+```
+
+or:
+
+```text
+http://localhost:8080/simulator
+```
+
+The API will also open the browser automatically when it starts.
+
+You can use another port if needed:
 
 ```bash
 uvicorn sensor_api.main:app --host 0.0.0.0 --port 8081
 ```
 
-When the API starts, it automatically opens:
+## Running Without Opening a Browser
 
-```text
-http://localhost:<port>/
-```
-
-That means you no longer need to run:
+If you're running this over SSH, in a container, or somewhere without a desktop:
 
 ```bash
-xdg-open "http://localhost:8080/Live%20Interceptor%20Simulator%20(API).html"
+OLGAFECTO_AUTO_OPEN=0 \
+uvicorn sensor_api.main:app --host 0.0.0.0 --port 8080
 ```
 
-The old direct page path still works, but the preferred entry points are:
-
-```text
-http://localhost:8080/
-http://localhost:8080/simulator
-```
-
-## Disable Auto-Open
-
-If you are running on a server, in SSH, inside a container, or anywhere a browser should not launch:
+If you need to explicitly set the port used by the browser launcher:
 
 ```bash
-OLGAFECTO_AUTO_OPEN=0 uvicorn sensor_api.main:app --host 0.0.0.0 --port 8080
+OLGAFECTO_WEB_PORT=8081 \
+uvicorn sensor_api.main:app --host 0.0.0.0 --port 8081
 ```
 
-If your process manager hides the `--port` argument from the app, you can explicitly tell the opener which port to use:
+## API Examples
 
-```bash
-OLGAFECTO_WEB_PORT=8081 uvicorn sensor_api.main:app --host 0.0.0.0 --port 8081
-```
-
-## API Shape
-
-Create a scenario:
+### Create a scenario
 
 ```bash
 curl -X POST http://localhost:8080/scenario \
@@ -134,39 +189,45 @@ curl -X POST http://localhost:8080/scenario \
   }'
 ```
 
-Fetch current target tracks:
+### Get target tracks
 
 ```bash
 curl http://localhost:8080/targets
 ```
 
-Fetch all C++-driven simulation tracks, including interceptors:
+### Get all tracks
+
+This includes both targets and interceptors:
 
 ```bash
 curl http://localhost:8080/tracks
 ```
 
-Fetch engagement counters:
+### Get engagement status
 
 ```bash
 curl http://localhost:8080/status
 ```
 
-Generate a varied C++-owned raid:
+### Generate a random raid
 
 ```bash
 curl -X POST http://localhost:8080/scenario/random \
   -H "Content-Type: application/json" \
-  -d '{"scenario_kind":"saturation","count":5,"seed":42}'
+  -d '{
+    "scenario_kind": "saturation",
+    "count": 5,
+    "seed": 42
+  }'
 ```
 
-Fetch C++ engagement events after a given event id:
+### Get events
 
 ```bash
-curl http://localhost:8080/events?after=0
+curl "http://localhost:8080/events?after=0"
 ```
 
-Run a C++ raid stress test:
+### Run a stress test
 
 ```bash
 curl -X POST http://localhost:8080/stress-test \
@@ -183,28 +244,62 @@ curl -X POST http://localhost:8080/stress-test \
   }'
 ```
 
-The response estimates the first raid size where the defense starts to struggle or fail under those assumptions.
+This runs a series of raids through the C++ engine and returns the results for each raid size.
 
-## Data Layer Note
+## Data Layer
 
-`data_layer/` is currently a placeholder for the next architecture phase. Database-backed telemetry, scenario persistence, replay tables, and migrations are not production-ready yet.
+`data_layer/` isn't doing much yet.
 
-Expected future direction:
+The eventual goal is to use it for things like:
 
-- define telemetry and engagement tables
-- add a migration tool
-- write simulation frames to a database
-- expose replay/history endpoints from the API
-- add retention and cleanup policies
+* storing telemetry
+* saving scenarios
+* keeping engagement history
+* replaying previous simulations
+* database migrations
+* cleaning up old simulation data
 
-Until that work is complete, treat the simulator state as in-memory and temporary.
+For now, the simulation is in-memory and disappears when the application stops.
 
-## Development Notes
+## Some Design Decisions
 
-- The browser UI is served from `web_gui/`.
-- JavaScript is display-only for physics. It may project world coordinates, rotate sprites, animate explosions, and draw HUD elements, but it must not compute guidance, interceptor motion, radar detection, speed limits, fuze checks, hit decisions, or leaker decisions.
-- `sensor_api/radar_sim.py` is intentionally thin. It converts API requests/responses to and from `physics_engine.EngagementEngine`; all simulation state transitions belong in C++.
-- Generated salvos, threat variation, delayed arrivals, launch bearings, and launch/intercept/impact events are C++ owned. The browser only renders snapshots and event effects returned by the API.
-- Raid stress testing is C++ owned. Python exposes the request/response; the frontend only displays the summary.
-- The API static mount is intentionally registered last so API routes keep working.
-- `OLGAFECTO_AUTO_OPEN=0` is the clean switch for CI, headless SSH, or server use.
+### Keep the simulation in C++
+
+I wanted the actual simulation to have one source of truth.
+
+`EngagementEngine` owns the state changes and engagement decisions. Python calls into it, and the frontend displays the results.
+
+That means I don't have to worry about the JavaScript implementation slowly becoming different from the actual simulation.
+
+### Keep Python fairly thin
+
+`sensor_api/radar_sim.py` is mostly an adapter between FastAPI and the C++ engine.
+
+Ideally, a request comes in, Python passes it to C++, and the resulting state gets turned back into an API response.
+
+The physics and engagement logic shouldn't end up scattered throughout the Python code.
+
+### Keep the frontend focused on visualization
+
+The frontend can make the simulation look good, but it shouldn't change what the simulation actually does.
+
+So things like coordinate projection, sprite rotation, animations, and HUD elements belong in JavaScript.
+
+Guidance, radar decisions, fuze checks, intercept decisions, and leakers belong in C++.
+
+## What's Next
+
+The biggest thing I want to work on next is the data layer.
+
+The rough plan is:
+
+1. Design the telemetry/database schema.
+2. Add migrations.
+3. Store simulation frames and engagement events.
+4. Save scenarios.
+5. Add replay/history support.
+6. Expose that history through the API.
+
+After that, there are other things I'd eventually want to add, such as authentication and better deployment configuration.
+
+For now, though, the project is primarily a **local simulation and experimentation environment**.
